@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cardápio Digital - Renshu Sushi</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #121212;
+            color: #E0E0E0;
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Topo Fixo */
+        header {
+            background-color: #1A1A1A;
+            padding: 15px;
+            text-align: center;
+            border-bottom: 2px solid #2D2D2D;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        header h1 { color: #E53935; font-size: 20px; margin-bottom: 2px; }
+        header p { color: #888; font-size: 12px; }
+
+        /* Categorias horizontais (estilo carrossel no celular) */
+        .categorias-container {
+            background-color: #1A1A1A;
+            padding: 10px;
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            white-space: nowrap;
+            border-bottom: 1px solid #2D2D2D;
+            position: sticky;
+            top: 74px;
+            z-index: 9;
+            scrollbar-width: none; /* Esconde scroll no Firefox */
+        }
+        .categorias-container::-webkit-scrollbar { display: none; } /* Esconde scroll no Chrome/Safari */
+        
+        .categoria-btn {
+            background-color: #262626; color: white; border: none; padding: 8px 16px;
+            border-radius: 20px; font-size: 14px; font-weight: bold; cursor: pointer;
+            transition: 0.2s; display: inline-block;
+        }
+        .categoria-btn.active { background-color: #E53935; }
+
+        /* Área Principal */
+        .main-content {
+            padding: 15px;
+            flex-grow: 1;
+            margin-bottom: 80px; /* Espaço para a barra do carrinho móvel */
+        }
+        #titulo-categoria { font-size: 18px; margin-bottom: 15px; border-left: 4px solid #E53935; padding-left: 8px; }
+        
+        .grid-produtos {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .produto-card {
+            background-color: #1E1E1E; border: 1px solid #2D2D2D; border-radius: 12px;
+            padding: 10px; display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .produto-img {
+            width: 100%; height: 110px; object-fit: contain; object-position: center;
+            border-radius: 8px; background-color: #2D2D2D; margin-bottom: 8px;
+            padding: 4px; display: block;
+        }
+        .produto-info h3 { font-size: 14px; margin-bottom: 4px; color: #FFF; }
+        .produto-info p { font-size: 11px; color: #AAA; line-height: 1.3; min-height: 30px; margin-bottom: 8px; }
+        .produto-preco { font-size: 16px; font-weight: bold; color: #4CAF50; margin-bottom: 8px; }
+        .add-btn {
+            background-color: #E53935; color: white; border: none; padding: 8px;
+            border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 12px;
+        }
+
+        /* Barra do Carrinho Inferior (Mobile Friendly) */
+        .cart-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background-color: #1A1A1A; border-top: 2px solid #2D2D2D;
+            padding: 12px 20px; display: flex; justify-content: space-between;
+            align-items: center; z-index: 100; cursor: pointer;
+        }
+        .cart-bar-info h3 { font-size: 15px; color: white; }
+        .cart-bar-info p { font-size: 12px; color: #4CAF50; font-weight: bold; }
+        .ver-carrinho-btn {
+            background-color: #4CAF50; color: white; border: none; padding: 10px 18px;
+            border-radius: 8px; font-weight: bold; font-size: 14px;
+        }
+
+        /* Modal do Carrinho / Fechamento */
+        .modal {
+            position: fixed; top: 0; bottom: 0; left: 0; right: 0;
+            background-color: rgba(0,0,0,0.85); z-index: 200;
+            display: none; justify-content: center; align-items: flex-end;
+        }
+        .modal-content {
+            background-color: #1A1A1A; width: 100%; max-width: 500px;
+            border-top-left-radius: 20px; border-top-right-radius: 20px;
+            max-height: 85vh; display: flex; flex-direction: column; padding: 20px;
+            overflow-y: auto; border-top: 3px solid #E53935;
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .modal-header h2 { font-size: 18px; color: white; }
+        .close-modal { background: none; border: none; color: #FFF; font-size: 24px; cursor: pointer; }
+
+        .cart-items { margin-bottom: 15px; }
+        .cart-item {
+            display: flex; justify-content: space-between; align-items: center;
+            background-color: #262626; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px;
+        }
+        .cart-item-info h4 { font-size: 13px; color: white; }
+        .cart-item-info p { font-size: 12px; color: #4CAF50; }
+        .remove-btn { background: none; border: none; color: #FF4444; font-size: 14px; cursor: pointer; }
+
+        /* Formulários de Endereço e Dados */
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; color: #AAA; margin-bottom: 4px; }
+        .form-control {
+            width: 100%; background-color: #262626; border: 1px solid #333; color: white;
+            padding: 10px; border-radius: 8px; font-size: 14px; outline: none;
+        }
+        .form-control:focus { border-color: #E53935; }
+
+        .resumo-valores {
+            background-color: #222; padding: 12px; border-radius: 8px; margin: 15px 0;
+            font-size: 14px;
+        }
+        .resumo-linha { display: flex; justify-content: space-between; margin-bottom: 6px; }
+        .resumo-linha.total { font-weight: bold; font-size: 16px; color: white; border-top: 1px solid #333; padding-top: 6px; margin-top: 6px; }
+
+        .checkout-btn {
+            background-color: #4CAF50; color: white; border: none; padding: 12px;
+            border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; width: 100%;
+        }
+
+        /* Seção PIX */
+        .pix-section {
+            background-color: #222; padding: 15px; border-radius: 8px; margin: 15px 0;
+            border: 2px solid #4CAF50; display: none;
+        }
+        .pix-section.ativo { display: block; }
+        .pix-section h4 { color: #4CAF50; font-size: 16px; margin-bottom: 10px; text-align: center; }
+        .pix-chave-container {
+            background-color: #1A1A1A; padding: 12px; border-radius: 8px; margin-bottom: 10px;
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        }
+        .pix-chave-texto {
+            color: #FFF; font-size: 14px; word-break: break-all; flex-grow: 1;
+            font-family: 'Courier New', monospace; font-weight: bold;
+        }
+        .btn-copiar-pix {
+            background-color: #4CAF50; color: white; border: none; padding: 8px 12px;
+            border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer;
+            white-space: nowrap; transition: 0.2s;
+        }
+        .btn-copiar-pix:hover { background-color: #45a049; }
+        .btn-copiar-pix.copiado {
+            background-color: #2196F3;
+        }
+        .pix-aviso {
+            background-color: #1A1A1A; padding: 10px; border-radius: 6px; font-size: 13px;
+            color: #AAA; text-align: center; line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🍣 Renshu Sushi</h1>
+        <p>Delivery & Balcão</p>
+    </header>
+
+    <div class="categorias-container" id="lista-categorias"></div>
+
+    <div class="main-content">
+        <h2 id="titulo-categoria">Carregando categorias...</h2>
+        <div class="grid-produtos" id="grid-produtos"></div>
+    </div>
+
+    <div class="cart-bar" id="cart-bar" style="display: none;" onclick="abrirCarrinho()">
+        <div class="cart-bar-info">
+            <h3 id="cart-bar-qtd">🛒 0 itens selecionados</h3>
+            <p id="cart-bar-total">Subtotal: R$ 0,00</p>
+        </div>
+        <button class="ver-carrinho-btn">Ver sacola</button>
+    </div>
+
+    <div class="modal" id="cart-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🛍️ Seu Carrinho</h2>
+                <button class="close-modal" onclick="fecharCarrinho()">×</button>
+            </div>
+            
+            <div class="cart-items" id="itens-carrinho"></div>
+
+            <hr style="border-color: #333; margin-bottom: 15px;">
+
+            <h3 style="font-size: 14px; color: white; margin-bottom: 10px;">📍 Dados para Entrega</h3>
+            
+            <div class="form-group">
+                <label>Seu Nome *</label>
+                <input type="text" id="cli-nome" class="form-control" placeholder="Ex: João Silva">
+            </div>
+            <div class="form-group">
+                <label>WhatsApp *</label>
+                <input type="tel" id="cli-telefone" class="form-control" placeholder="Ex: (11) 99999-9999">
+            </div>
+            <div class="form-group">
+                <label>Bairro (Selecione para calcular taxa) *</label>
+                <select id="cli-bairro" class="form-control" onchange="atualizarValoresFinais()">
+                    <option value="" data-taxa="0">Selecione o seu Bairro...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Endereço Completo (Rua/Av) *</label>
+                <input type="text" id="cli-endereco" class="form-control" placeholder="Ex: Rua das Flores">
+            </div>
+            <div class="form-group">
+                <label>Número e Complemento *</label>
+                <input type="text" id="cli-numero" class="form-control" placeholder="Ex: 150 - Apto 32">
+            </div>
+            <div class="form-group">
+                <label>Forma de Pagamento *</label>
+                <select id="forma-pagamento" class="form-control">
+                    <option value="PIX">PIX (Online)</option>
+                    <option value="Cartão Maquininha">Cartão (Na entrega)</option>
+                    <option value="Dinheiro">Dinheiro</option>
+                </select>
+            </div>
+
+            <div class="resumo-valores">
+                <div class="resumo-linha">
+                    <span>Subtotal:</span>
+                    <span id="resumo-subtotal">R$ 0,00</span>
+                </div>
+                <div class="resumo-linha">
+                    <span>Taxa de Entrega:</span>
+                    <span id="resumo-taxa">R$ 0,00</span>
+                </div>
+                <div class="resumo-linha total">
+                    <span>Total do Pedido:</span>
+                    <span id="resumo-total">R$ 0,00</span>
+                </div>
+            </div>
+
+            <!-- Seção PIX -->
+            <div class="pix-chave-container">
+    <span class="pix-chave-texto" id="pix-chave-texto">renshuoriental@outlook.com</span>
+    <button type="button" class="btn-copiar-pix" onclick="copiarChavePix(event)">Copiar</button>
+</div>
+
+            <button class="checkout-btn" onclick="enviarPedidoWeb()">Finalizar e Enviar Pedido</button>
+        </div>
+    </div>
+
+    <script>
+        const IP_SERVIDOR = window.location.origin; // Adapta automaticamente ao IP que o cliente acessou!
+        let carrinho = [];
+        let produtosCarregados = [];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            carregarTaxas();
+            // Adiciona listener para mostrar/esconder PIX quando mudar a forma de pagamento
+            document.getElementById('forma-pagamento').addEventListener('change', atualizarExibicaoPix);
+        });
+
+        async function carregarTaxas() {
+            try {
+                const response = await fetch(`${IP_SERVIDOR}/api/taxas`);
+                const dados = await response.json();
+                const selectBairro = document.getElementById('cli-bairro');
+                if (dados.sucesso && Array.isArray(dados.taxas)) {
+                    selectBairro.innerHTML = '<option value="" data-taxa="0">Selecione o seu Bairro...</option>';
+                    dados.taxas
+                        .filter(taxa => taxa.bairro && !/sem taxa/i.test(taxa.bairro))
+                        .forEach(taxa => {
+                            const option = document.createElement('option');
+                            option.value = taxa.bairro;
+                            option.setAttribute('data-taxa', taxa.valor.toFixed(2));
+                            option.textContent = taxa.bairro;
+                            selectBairro.appendChild(option);
+                        });
+                } else {
+                    selectBairro.innerHTML = '<option value="" data-taxa="0">Selecione o seu Bairro...</option>';
+                }
+            } catch (erro) {
+                console.error('Erro ao carregar taxas:', erro);
+            }
+        }
+
+        async function carregarCategorias() {
+            try {
+                const response = await fetch(`${IP_SERVIDOR}/api/categorias`);
+                const dados = await response.json();
+                if (dados.sucesso && dados.categorias.length > 0) {
+                    const container = document.getElementById('lista-categorias');
+                    container.innerHTML = '';
+                    
+                    dados.categorias.forEach((cat, index) => {
+                        const btn = document.createElement('button');
+                        btn.className = 'categoria-btn';
+                        btn.innerText = cat;
+                        btn.onclick = () => {
+                            document.querySelectorAll('.categoria-btn').forEach(b => b.classList.remove('active'));
+                            btn.classList.add('active');
+                            carregarProdutos(cat);
+                        };
+                        container.appendChild(btn);
+
+                        // Ativa a primeira categoria por padrão ao iniciar
+                        if (index === 0) {
+                            btn.classList.add('active');
+                            carregarProdutos(cat);
+                        }
+                    });
+                }
+            } catch (erro) { console.error("Erro ao carregar categorias:", erro); }
+        }
+
+        async function carregarProdutos(categoria) {
+            document.getElementById('titulo-categoria').innerText = categoria;
+            const grid = document.getElementById('grid-produtos');
+            grid.innerHTML = '<p style="color:#aaa;">Carregando delícias...</p>';
+
+            try {
+                const response = await fetch(`${IP_SERVIDOR}/api/produtos/${categoria}`);
+                const dados = await response.json();
+                if (dados.sucesso) {
+                    grid.innerHTML = '';
+                    produtosCarregados = dados.produtos;
+                    
+                    if(dados.produtos.length === 0) {
+                        grid.innerHTML = '<p style="color:#666;">Nenhum item nesta categoria.</p>';
+                        return;
+                    }
+
+                    dados.produtos.forEach(prod => {
+                        const card = document.createElement('div');
+                        card.className = 'produto-card';
+                        
+                        // Busca a foto na pasta static do servidor, tratando nomes com espaços e caracteres especiais
+                        const nomeFoto = prod.foto ? encodeURIComponent(prod.foto) : '';
+                        const urlFoto = nomeFoto ? `${IP_SERVIDOR}/static/${nomeFoto}` : 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=200';
+
+                        card.innerHTML = `
+                            <img src="${urlFoto}" class="produto-img" alt="${prod.nome}">
+                            <div class="produto-info">
+                                <h3>${prod.nome}</h3>
+                                <p>${prod.descricao}</p>
+                            </div>
+                            <div>
+                                <div class="produto-preco">R$ ${prod.preco.toFixed(2).replace('.', ',')}</div>
+                                <button class="add-btn" onclick="adicionarAoCarrinho(${prod.id})">Adicionar à Sacola</button>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                }
+            } catch (erro) { grid.innerHTML = '<p style="color: red;">Erro ao carregar os produtos.</p>'; }
+        }
+
+        function adicionarAoCarrinho(id) {
+            const produto = produtosCarregados.find(p => p.id === id);
+            if (!produto) return;
+
+            carrinho.push(produto);
+            atualizarInterfaceCarrinho();
+        }
+
+        function removerDoCarrinho(index) {
+            carrinho.splice(index, 1);
+            atualizarInterfaceCarrinho();
+        }
+
+        function atualizarInterfaceCarrinho() {
+            const cartBar = document.getElementById('cart-bar');
+            const cartBarQtd = document.getElementById('cart-bar-qtd');
+            const cartBarTotal = document.getElementById('cart-bar-total');
+            
+            if (carrinho.length === 0) {
+                cartBar.style.display = 'none';
+                fecharCarrinho();
+                return;
+            }
+
+            // Mostra a barra do carrinho resumido
+            cartBar.style.display = 'flex';
+            let subtotal = carrinho.reduce((sum, item) => sum + item.preco, 0);
+            cartBarQtd.innerText = `🛒 ${carrinho.length} ${carrinho.length === 1 ? 'item' : 'itens'} na sacola`;
+            cartBarTotal.innerText = `Subtotal: R$ ${subtotal.toFixed(2).replace('.', ',')}`;
+
+            // Renderiza os itens dentro do modal
+            const container = document.getElementById('itens-carrinho');
+            container.innerHTML = '';
+            
+            carrinho.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'cart-item';
+                div.innerHTML = `
+                    <div class="cart-item-info">
+                        <h4>${item.nome}</h4>
+                        <p>R$ ${item.preco.toFixed(2).replace('.', ',')}</p>
+                    </div>
+                    <button class="remove-btn" onclick="removerDoCarrinho(${index})">Remover</button>
+                `;
+                container.appendChild(div);
+            });
+
+            atualizarValoresFinais();
+        }
+
+        function atualizarValoresFinais() {
+            let subtotal = carrinho.reduce((sum, item) => sum + item.preco, 0);
+
+            const selectBairro = document.getElementById('cli-bairro');
+            const opcaoSelecionada = selectBairro.options[selectBairro.selectedIndex];
+            const bairroSelecionado = selectBairro.value;
+            let taxaEntrega = parseFloat(opcaoSelecionada.getAttribute('data-taxa')) || 0;
+
+            let totalGeral = subtotal + taxaEntrega;
+
+            document.getElementById('resumo-subtotal').innerText = `R$ ${subtotal.toFixed(2).replace('.', ',')}`;
+            if (bairroSelecionado) {
+                document.getElementById('resumo-taxa').innerText = `R$ ${taxaEntrega.toFixed(2).replace('.', ',')}`;
+            } else {
+                document.getElementById('resumo-taxa').innerText = 'R$ 0,00';
+            }
+            document.getElementById('resumo-total').innerText = `R$ ${totalGeral.toFixed(2).replace('.', ',')}`;
+        }
+
+        function abrirCarrinho() {
+            document.getElementById('cart-modal').style.display = 'flex';
+            atualizarExibicaoPix();
+        }
+        function fecharCarrinho() { document.getElementById('cart-modal').style.display = 'none'; }
+
+        function atualizarExibicaoPix() {
+            const formaPagamento = document.getElementById('forma-pagamento').value;
+            const pixSection = document.getElementById('pix-section');
+            
+            if (formaPagamento === 'PIX') {
+                pixSection.classList.add('ativo');
+            } else {
+                pixSection.classList.remove('ativo');
+            }
+        }
+
+        function copiarChavePix(event) {
+           
+    // 1. Pega o texto da chave Pix
+    const chavePix = document.getElementById('pix-chave-texto').innerText;
+    
+    // 2. Acha o botão mesmo se clicar em um ícone interno
+    const botao = event ? event.target.closest('button') : document.querySelector('.btn-copiar'); 
+    const textoOriginal = botao.innerText;
+
+    // Função interna para aplicar o efeito visual de sucesso
+    function aplicarEfeitoSucesso() {
+        botao.innerText = '✅ Copiado!';
+        botao.classList.add('copiado');
+        
+        setTimeout(() => {
+            botao.innerText = textoOriginal;
+            botao.classList.remove('copiado');
+        }, 2000);
+    }
+
+    // 3. Tenta usar o método moderno (HTTPS ou localhost)
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(chavePix)
+            .then(() => aplicarEfeitoSucesso())
+            .catch(() => executarFallback(chavePix, aplicarEfeitoSucesso));
+    } else {
+        // 4. Força o método antigo para celular via HTTP (IP)
+        executarFallback(chavePix, aplicarEfeitoSucesso);
+    }
+}
+
+// Função de segurança (Fallback) para garantir que funcione no celular via IP
+function executarFallback(texto, sucessoCallback) {
+    try {
+        const elementoTemporario = document.createElement('textarea');
+        elementoTemporario.value = texto;
+        elementoTemporario.style.position = 'fixed'; 
+        document.body.appendChild(elementoTemporario);
+        
+        elementoTemporario.select();
+        elementoTemporario.setSelectionRange(0, 99999); // Suporte para iOS
+        const copiou = document.execCommand('copy');
+        
+        document.body.removeChild(elementoTemporario);
+
+        if (copiou) {
+            sucessoCallback();
+        } else {
+            throw new Error('Falha ao copiar');
+        }
+    } catch (err) {
+        alert('Não foi possível copiar automaticamente. Chave: ' + texto);
+    }
+}
+
+        function enviarPedidoWeb() {
+            const nome = document.getElementById('cli-nome').value.trim();
+            const telefone = document.getElementById('cli-telefone').value.trim();
+            const bairro = document.getElementById('cli-bairro').value;
+            const endereco = document.getElementById('cli-endereco').value.trim();
+            const numero = document.getElementById('cli-numero').value.trim();
+            const formaPagamento = document.getElementById('forma-pagamento').value;
+
+            if (!nome || !telefone || !bairro || !endereco || !numero) {
+                alert("Por favor, preencha todos os campos obrigatórios para a entrega!");
+                return;
+            }
+
+            let subtotal = carrinho.reduce((sum, item) => sum + item.preco, 0);
+            const selectBairro = document.getElementById('cli-bairro');
+            const opcaoSelecionada = selectBairro.options[selectBairro.selectedIndex];
+            let taxaEntrega = parseFloat(opcaoSelecionada.getAttribute('data-taxa')) || 0;
+            let totalGeral = subtotal + taxaEntrega;
+
+            if (!bairro) {
+                alert('Selecione um bairro para calcular a taxa de entrega.');
+                return;
+            }
+
+            // Formata os nomes dos produtos em string amigável
+            let itensDetalhados = [];
+            carrinho.forEach(item => {
+                const itemExistente = itensDetalhados.find(i => i.nome === item.nome);
+                if (itemExistente) {
+                    itemExistente.qtd += 1;
+                    itemExistente.preco_total += Number(item.preco || 0);
+                } else {
+                    itensDetalhados.push({
+                        nome: item.nome,
+                        qtd: 1,
+                        preco_unitario: Number(item.preco || 0),
+                        preco_total: Number(item.preco || 0)
+                    });
+                }
+            });
+
+            let itensNomesFormatados = itensDetalhados.map(item => `${item.qtd}x ${item.nome}`).join(', ');
+            let stringItensCompleta = `${itensNomesFormatados} | 🛵 Entrega: R$ ${taxaEntrega.toFixed(2)}`;
+
+            let dadosPedido = {
+                itens: stringItensCompleta,
+                itens_detalhados: itensDetalhados,
+                total: totalGeral,
+                taxa_entrega: taxaEntrega,
+                forma_pagamento: formaPagamento,
+                cliente: `${nome} (${telefone}) - ${endereco}, ${numero} - Bairro: ${bairro}`,
+                telefone: telefone,
+                endereco: `${endereco}, ${numero}`,
+                bairro: bairro
+            };
+
+            // Envia para o seu Caixa local
+            fetch(`${IP_SERVIDOR}/api/pedido`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dadosPedido)
+            })
+            .then(res => res.json())
+            .then(dados => {
+                if (dados.sucesso) {
+                    // 1. Monta a mensagem bonita para o WhatsApp
+                    let textoZap = `*NOVO PEDIDO WEB* 🍣\n\n`;
+                    textoZap += `*Cliente:* ${nome}\n`;
+                    textoZap += `*Contato:* ${telefone}\n`;
+                    textoZap += `*Endereço:* ${endereco}, ${numero} - Bairro: ${bairro}\n\n`;
+                    textoZap += `*Resumo do Pedido:*\n${stringItensCompleta}\n\n`;
+                    textoZap += `*Pagamento:* ${formaPagamento}\n`;
+                    textoZap += `*Total:* R$ ${totalGeral.toFixed(2).replace('.', ',')}`;
+
+                    // INSIRA O NÚMERO DO WHATSAPP DA LOJA COM 55 E DDD
+                    let numeroLoja = "5511963734712"; 
+                    let linkZap = `https://wa.me/${numeroLoja}?text=${encodeURIComponent(textoZap)}`;
+
+                    alert(`✅ PEDIDO ENVIADO!\n\nVocê será redirecionado para o nosso WhatsApp para confirmar o envio.`);
+                    window.location.href = linkZap;
+
+                    // Limpa a sacola
+                    carrinho = [];
+                    atualizarInterfaceCarrinho();
+                    fecharCarrinho();
+                } else {
+                    alert("Ocorreu uma falha ao enviar o seu pedido.");
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert("Erro ao conectar com o servidor.");
+            });
+        }
+
+        // Executa ao carregar a página
+        window.onload = carregarCategorias;
+    </script>
+</body>
+</html>
