@@ -14,8 +14,16 @@ CORS(app)  # Permite que o tablet e celulares conectem ao computador
 pedidos_pendentes_caixa = []
 
 # ✅ CRIANDO AS TABELAS NECESSÁRIAS SE NÃO EXISTIREM
+import os
+import sqlite3
+
+# Define o caminho absoluto para a pasta onde este arquivo .py está
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'sistema_delivery.db')
+
 def inicializar_banco():
-    conn = sqlite3.connect('sistema_delivery.db')
+    # Usa o caminho absoluto em vez de apenas 'sistema_delivery.db'
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     # Tabela de Produtos
@@ -30,6 +38,8 @@ def inicializar_banco():
             estoque INTEGER DEFAULT 0
         )
     ''')
+    conn.commit()
+    conn.close()
     
     # Tabela de Taxas de Entrega
     cursor.execute('''
