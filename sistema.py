@@ -1,13 +1,67 @@
+
 import customtkinter as ctk
 import sqlite3
 import os
 import json
+import time
+import threading
 from tkinter import messagebox, filedialog
 from PIL import Image
 
 # --- NOVOS IMPORTS DO TOTEM ADICIONADOS AQUI ---
 import requests
 import winsound
+
+# --- CONFIGURAÇÃO DA INTEGRAÇÃO COM O CARDÁPIO WEB ---
+URL_RENDER = "https://card-pio-digital-ctoj.onrender.com/api/pedidos_pendentes"
+
+def checar_pedidos_web():
+    while True:
+        try:
+            res = requests.get(URL_RENDER, timeout=5)
+            if res.status_code == 200:
+                pedidos = res.json()
+                for p in pedidos:
+                    # 1. 🔔 Som de alerta no PC (1200Hz por 1 segundo)
+                    winsound.Beep(1200, 1000)
+                    
+                    # 2. 💾 Grava no banco local
+                    salvar_no_historico_local(p)
+                    
+                    print(f"🎉 NOVO PEDIDO WEB RECEBIDO: #{p.get('id_pedido')} - {p.get('cliente')}")
+        except Exception:
+            pass  # Ignora oscilações temporárias de conexão
+            
+        time.sleep(4)
+
+def salvar_no_historico_local(p):
+    try:
+        conn = sqlite3.connect("sistema_delivery.db")
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vendas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data TEXT,
+                cliente TEXT,
+                total REAL,
+                pagamento TEXT,
+                itens TEXT
+            )
+        ''')
+        
+        import datetime
+        data_hora = p.get("data_hora") or datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        
+        cursor.execute('''
+            INSERT INTO vendas (data, cliente, total, pagamento, itens)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (data_hora, p.get('cliente'), p.get('total'), p.get('forma_pagamento'), p.get('itens')))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro ao gravar pedido no caixa local: {e}")
 
 # Configuração global de tema e aparência
 ctk.set_appearance_mode("Dark")
@@ -17,16 +71,16 @@ def verificar_pedidos_totem(janela_principal):
     try:
         import requests
         import re
-        import json  # ⚠️ IMPORT ADICIONADO (Faltava e quebrava o código silenciosamente)
+        import json 
         from collections import defaultdict
         from tkinter import messagebox
         import win32print
         import datetime
         import sqlite3
-        import winsound # ⚠️ IMPORT ADICIONADO
+        import winsound
 
         # Pergunta ao servidor Flask se há alertas de novos pedidos
-        resposta = requests.get("http://127.0.0.1:5000/api/caixa/alertas", timeout=2)
+        resposta = requests.get("https://card-pio-digital-ctoj.onrender.com/api/caixa/alertas")
         dados = resposta.json()
 
         if dados.get("sucesso") and dados.get("alertas"):
@@ -113,7 +167,7 @@ def verificar_pedidos_totem(janela_principal):
                     )
 
                 # ==========================================================
-                # INÍCIO DO TRATAMENTO DE STRING PARA O CUPOM (Mantido original)
+                # INÍCIO DO TRATAMENTO DE STRING PARA O CUPOM
                 # ==========================================================
                 nome_c, tel_c, end_c, bair_c = "Cliente Web/Totem", "Não Informado", "Endereço não informado", "Não Informado"
                 texto_cliente_limpo = texto_cliente_bruto.strip()
@@ -185,6 +239,44 @@ def verificar_pedidos_totem(janela_principal):
                 data_hora_cupom = agora.strftime("%d/%m/%Y %H:%M")
                 data_hoje_cupom = agora.strftime("%d/%m/%Y")
                 hora_cozinha = agora.strftime("%H:%M:%S")
+
+                # ==========================================================
+                # 💾 1. SALVANDO NO BANCO DE DADOS LOCAL (HISTÓRICO E CLIENTES)
+                # ==========================================================
+                try:
+                    conn_bd = sqlite3.connect("sistema_delivery.db")
+                    cursor_bd = conn_bd.cursor()
+
+                    # A. Salva/Atualiza o cliente no banco local usando rowid para segurança
+                    if nome_c and nome_c != "Cliente Web/Totem":
+                        cursor_bd.execute("SELECT rowid FROM clientes WHERE nome = ? LIMIT 1", (nome_c,))
+                        if not cursor_bd.fetchone():
+                            try:
+                                cursor_bd.execute(
+                                    "INSERT INTO clientes (nome, telefone, endereco, bairro) VALUES (?, ?, ?, ?)",
+                                    (nome_c, tel_c, end_c, bair_c)
+                                )
+                            except Exception as e_cli:
+                                print(f"⚠️ Aviso ao registrar cliente: {e_cli}")
+
+                    # B. Formata itens com a tag de taxa de entrega para o histórico
+                    if taxa_entrega > 0:
+                        itens_para_banco = f"{texto_produtos} | 🛵 Entrega: R$ {taxa_entrega:.2f}"
+                    else:
+                        itens_para_banco = texto_produtos
+
+                    # C. Grava a venda na tabela 'vendas'
+                    cursor_bd.execute('''
+                        INSERT INTO vendas (data, cliente, total, pagamento, itens, status)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (data_hora_cupom, nome_c, tot, pag, itens_para_banco, 'Finalizado'))
+
+                    conn_bd.commit()
+                    conn_bd.close()
+                    print(f"💾 [HISTÓRICO LOCAL] Pedido Web #{numero_pedido} salvo com sucesso no banco SQLite!")
+
+                except Exception as err_bd:
+                    print(f"❌ Erro ao salvar pedido no histórico local: {err_bd}")
 
                 # Montagem do Cupom
                 cupom = []
@@ -288,11 +380,9 @@ def verificar_pedidos_totem(janela_principal):
                     print(f"Aviso: Erro ao enviar para a impressora da cozinha: {erro_cozinha}")
 
     except Exception as e:
-        # 🔴 Agora não deixamos o erro passar em branco. Ele será impresso no terminal!
         print(f"⚠️ [MONITORAMENTO] Erro ao verificar alertas: {e}")
         
     finally:
-        # ⚠️ CORREÇÃO FATAL: O loop deve RECOMEÇAR sempre, mesmo que haja erro de rede!
         janela_principal.after(3000, lambda: verificar_pedidos_totem(janela_principal))
     
 # Cores da Paleta RENSHU SUSHI - Neon Dark
