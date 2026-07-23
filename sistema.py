@@ -266,10 +266,11 @@ def verificar_pedidos_totem(janela_principal):
                         itens_para_banco = texto_produtos
 
                     # C. Grava a venda na tabela 'vendas'
+                    # C. Insere na tabela 'vendas' (sem a coluna status)
                     cursor_bd.execute('''
-                        INSERT INTO vendas (data, cliente, total, pagamento, itens, status)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (data_hora_cupom, nome_c, tot, pag, itens_para_banco, 'Finalizado'))
+                        INSERT INTO vendas (data, cliente, total, pagamento, itens)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (data_hora_cupom, nome_c, tot, pag, itens_para_banco))
 
                     conn_bd.commit()
                     conn_bd.close()
