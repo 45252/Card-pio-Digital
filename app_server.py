@@ -13,20 +13,15 @@ CORS(app)  # Permite que o tablet e celulares conectem ao computador
 # Lista temporária na memória para enviar os alertas ao Caixa
 pedidos_pendentes_caixa = []
 
-# ✅ CRIANDO AS TABELAS NECESSÁRIAS SE NÃO EXISTIREM
-import os
-import sqlite3
-
-# Define o caminho absoluto para a pasta onde este arquivo .py está
+# Define o caminho absoluto para o banco no servidor
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'sistema_delivery.db')
 
 def inicializar_banco():
-    # Usa o caminho absoluto em vez de apenas 'sistema_delivery.db'
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Tabela de Produtos
+    # 1. Tabela de Produtos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,10 +33,8 @@ def inicializar_banco():
             estoque INTEGER DEFAULT 0
         )
     ''')
-    conn.commit()
-    conn.close()
     
-    # Tabela de Taxas de Entrega
+    # 2. Tabela de Taxas de Entrega
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS taxas_entrega (
             bairro TEXT PRIMARY KEY,
@@ -49,7 +42,7 @@ def inicializar_banco():
         )
     ''')
     
-    # Tabela de Vendas
+    # 3. Tabela de Vendas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS vendas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,23 +55,23 @@ def inicializar_banco():
         )
     ''')
     
+    # Salva todas as tabelas e fecha a conexão no FINAL
     conn.commit()
     conn.close()
 
-# Chama a inicialização do banco quando o servidor inicia
+# Chama a inicialização do banco
 inicializar_banco()
 
 def listar_produtos():
-    conn = sqlite3.connect('sistema_delivery.db') 
+    conn = sqlite3.connect(DB_PATH) 
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM produtos")
     produtos = cursor.fetchall()
     conn.close()
     return produtos
 
-
 def listar_taxas_entrega():
-    conn = sqlite3.connect('sistema_delivery.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT bairro, valor FROM taxas_entrega ORDER BY bairro ASC")
     taxas = cursor.fetchall()
@@ -99,7 +92,6 @@ def normalizar_texto(texto):
     texto = ''.join(ch for ch in texto if not unicodedata.combining(ch))
     texto = re.sub(r'[^a-z0-9]+', '', texto)
     return texto
-
 
 def resolver_nome_foto(img_path, nome_produto=None):
     if not img_path and not nome_produto:
@@ -258,7 +250,7 @@ def receber_pedido():
 
     # Gravando no banco
     try:
-        conn = sqlite3.connect('sistema_delivery.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         cursor.execute('''
@@ -299,17 +291,12 @@ def receber_pedido():
 
     return jsonify({"sucesso": True, "mensagem": "Pedido salvo e enviado ao Caixa!"})
 
-
-# --- ROTA QUE ENTREGARÁ OS ALERTAS AO CAIXA ---
+# --- ROTAS QUE ENTREGAM OS ALERTAS AO CAIXA ---
 
 @app.route('/api/caixa/alertas', methods=['GET'])
 def obter_alertas_caixa():
     global pedidos_pendentes_caixa
-    
-    # 🎯 CORREÇÃO: Entrega todos os pedidos pendentes
     alertas_para_enviar = list(pedidos_pendentes_caixa)
-    
-    # Só limpa a fila se ela realmente contiver itens que foram entregues nesta consulta
     if alertas_para_enviar:
         pedidos_pendentes_caixa.clear()
         print(f"📦 [ENTREGA DE ALERTAS]: {len(alertas_para_enviar)} alerta(s) enviado(s) ao Caixa!")
@@ -319,6 +306,12 @@ def obter_alertas_caixa():
         "alertas": alertas_para_enviar
     })
 
+@app.route('/api/pedidos_pendentes', methods=['GET'])
+def buscar_pedidos_pendentes():
+    global pedidos_pendentes_caixa
+    pedidos_para_enviar = list(pedidos_pendentes_caixa)
+    pedidos_pendentes_caixa.clear()
+    return jsonify(pedidos_para_enviar)
 
 @app.route('/api/taxas', methods=['GET'])
 def obter_taxas_entrega():
@@ -327,18 +320,6 @@ def obter_taxas_entrega():
     except Exception as e:
         return jsonify({"sucesso": False, "taxas": [], "erro": str(e)})
 
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
-
-@app.route('/api/pedidos_pendentes', methods=['GET'])
-def buscar_pedidos_pendentes():
-    global pedidos_pendentes_caixa
-    
-    # Devolve todos os pedidos pendentes para o caixa
-    pedidos_para_enviar = list(pedidos_pendentes_caixa)
-    
-    # Limpa a fila para não enviar o mesmo pedido várias vezes
-    pedidos_pendentes_caixa.clear()
-    
-    return jsonify(pedidos_para_enviar)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
