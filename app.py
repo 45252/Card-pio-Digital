@@ -1,242 +1,344 @@
-import customtkinter as ctk
+import os
 import sqlite3
-from tkinter import messagebox
+import datetime
+import json
+import re
+import unicodedata
+from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask_cors import CORS
 
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+app = Flask(__name__)
+CORS(app)  # Permite que o tablet e celulares conectem ao computador
+
+# Lista temporária na memória para enviar os alertas ao Caixa
+pedidos_pendentes_caixa = []
+
+# ✅ CRIANDO AS TABELAS NECESSÁRIAS SE NÃO EXISTIREM
+import os
+import sqlite3
+
+# Define o caminho absoluto para a pasta onde este arquivo .py está
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'sistema_delivery.db')
 
 def inicializar_banco():
-    conn = sqlite3.connect("sistema_delivery.db")
+    # Usa o caminho absoluto em vez de apenas 'sistema_delivery.db'
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, preco REAL NOT NULL, descricao TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS clientes (telefone TEXT PRIMARY KEY, nome TEXT NOT NULL, endereco TEXT NOT NULL, bairro TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS taxas_entrega (bairro TEXT PRIMARY KEY, valor REAL NOT NULL)")
-    conn.commit(); conn.close()
+    
+    # Tabela de Produtos
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS produtos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            preco REAL NOT NULL,
+            descricao TEXT,
+            foto TEXT,
+            categoria TEXT DEFAULT 'Geral',
+            estoque INTEGER DEFAULT 0
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    
+    # Tabela de Taxas de Entrega
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS taxas_entrega (
+            bairro TEXT PRIMARY KEY,
+            valor REAL NOT NULL
+        )
+    ''')
+    
+    # Tabela de Vendas
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL,
+            cliente TEXT NOT NULL,
+            total REAL NOT NULL,
+            pagamento TEXT,
+            itens TEXT,
+            status TEXT DEFAULT 'Pendente'
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Chama a inicialização do banco quando o servidor inicia
+inicializar_banco()
 
 def listar_produtos():
-    conn = sqlite3.connect("sistema_delivery.db"); cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, preco, descricao FROM produtos")
-    dados = cursor.fetchall(); conn.close()
-    return dados
+    conn = sqlite3.connect('sistema_delivery.db') 
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM produtos")
+    produtos = cursor.fetchall()
+    conn.close()
+    return produtos
 
-def listar_taxas():
-    conn = sqlite3.connect("sistema_delivery.db"); cursor = conn.cursor()
+
+def listar_taxas_entrega():
+    conn = sqlite3.connect('sistema_delivery.db')
+    cursor = conn.cursor()
     cursor.execute("SELECT bairro, valor FROM taxas_entrega ORDER BY bairro ASC")
-    dados = cursor.fetchall(); conn.close()
-    return dados
+    taxas = cursor.fetchall()
+    conn.close()
+    return [{"bairro": bairro, "valor": float(valor)} for bairro, valor in taxas]
 
-class CarrinhoDeCompras:
-    def __init__(self):
-        self.itens = {}
-        self.taxa_entrega = 0.0
-    def adicionar(self, p_id, nome, preco):
-        if p_id in self.itens: self.itens[p_id]['qtd'] += 1
-        else: self.itens[p_id] = {'nome': nome, 'preco': preco, 'qtd': 1}
-    def remover(self, p_id):
-        if p_id in self.itens:
-            if self.itens[p_id]['qtd'] > 1: self.itens[p_id]['qtd'] -= 1
-            else: del self.itens[p_id]
-    def obter_totais(self):
-        sub = sum(item['preco'] * item['qtd'] for item in self.itens.values())
-        return sub, sub + self.taxa_entrega
+# --- ROTAS PARA O CARDÁPIO WEB ---
 
-class AppPDV:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("DELIV_RED - Painel PDV")
-        self.root.geometry("1100x700")
-        inicializar_banco()
-        self.carrinho = CarrinhoDeCompras()
-        self.configurar_layout()
-        
-    def configurar_layout(self):
-        self.menu_lateral = ctk.CTkFrame(self.root, width=200, fg_color="#1A1A1A", corner_radius=0)
-        self.menu_lateral.pack(side="left", fill="y")
-        ctk.CTkLabel(self.menu_lateral, text="🚀 DELIV_RED", font=("Arial", 22, "bold"), text_color="#D32F2F").pack(pady=20)
-        ctk.CTkButton(self.menu_lateral, text="🍔 Cadastrar Itens", fg_color="#D32F2F", command=self.abrir_gerenciador).pack(pady=10, padx=15, fill="x")
-        ctk.CTkButton(self.menu_lateral, text="👥 Cadastrar Clientes", fg_color="#2E7D32", command=self.abrir_gerenciador_clientes).pack(pady=5, padx=15, fill="x")
-        ctk.CTkButton(self.menu_lateral, text="📍 Configurar Taxas", fg_color="#1976D2", command=self.abrir_gerenciador_taxas).pack(pady=5, padx=15, fill="x")
-        
-        self.area_central = ctk.CTkFrame(self.root, fg_color="#121212", corner_radius=0)
-        self.area_central.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-        ctk.CTkLabel(self.area_central, text="🍔 Cardápio Disponível", font=("Arial", 20, "bold")).pack(anchor="w", pady=10, padx=10)
-        self.scroll_vitrine = ctk.CTkScrollableFrame(self.area_central, fg_color="transparent")
-        self.scroll_vitrine.pack(fill="both", expand=True)
-        self.atualizar_vitrine_tela()
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-        self.aba_direita = ctk.CTkFrame(self.root, width=400, fg_color="#1A1A1A", corner_radius=0)
-        self.aba_direita.pack(side="right", fill="y")
-        ctk.CTkLabel(self.aba_direita, text="🛒 Carrinho", font=("Arial", 16, "bold")).pack(pady=10)
-        self.scroll_carrinho = ctk.CTkScrollableFrame(self.aba_direita, height=180, fg_color="#121212")
-        self.scroll_carrinho.pack(fill="x", padx=15, pady=5)
-        
-        ctk.CTkLabel(self.aba_direita, text="📍 Cliente", font=("Arial", 14, "bold"), text_color="#D32F2F").pack(anchor="w", padx=15, pady=5)
-        self.txt_tel = ctk.CTkEntry(self.aba_direita, placeholder_text="Telefone", fg_color="#121212")
-        self.txt_tel.pack(fill="x", padx=15, pady=3)
-        self.txt_tel.bind("<FocusOut>", self.buscar_cliente_automatico)
-        self.txt_nome = ctk.CTkEntry(self.aba_direita, placeholder_text="Nome", fg_color="#121212")
-        self.txt_nome.pack(fill="x", padx=15, pady=3)
-        self.txt_end = ctk.CTkEntry(self.aba_direita, placeholder_text="Endereço", fg_color="#121212")
-        self.txt_end.pack(fill="x", padx=15, pady=3)
-        
-        self.combo_bairros_pdv = ctk.CTkOptionMenu(self.aba_direita, values=["Selecione o Bairro"], fg_color="#333", button_color="#444", command=self.ao_selecionar_bairro_pdv)
-        self.combo_bairros_pdv.pack(fill="x", padx=15, pady=3)
-        self.atualizar_dropdown_bairros_pdv()
-        
-        self.combo_pag = ctk.CTkOptionMenu(self.aba_direita, values=["Pix", "Cartão", "Dinheiro"], fg_color="#D32F2F")
-        self.combo_pag.pack(fill="x", padx=15, pady=5); self.combo_pag.set("Pix")
-        
-        self.lbl_sub = ctk.CTkLabel(self.aba_direita, text="Subtotal: R$ 0.00"); self.lbl_sub.pack(anchor="w", padx=15)
-        self.lbl_tx = ctk.CTkLabel(self.aba_direita, text="Taxa: R$ 0.00"); self.lbl_tx.pack(anchor="w", padx=15)
-        self.lbl_tot = ctk.CTkLabel(self.aba_direita, text="TOTAL: R$ 0.00", font=("Arial", 18, "bold"), text_color="#D32F2F")
-        self.lbl_tot.pack(anchor="w", padx=15, pady=5)
-        
-        ctk.CTkButton(self.aba_direita, text="🚀 ENVIAR PEDIDO", height=45, fg_color="#D32F2F", font=("Arial", 14, "bold"), command=self.finalizar_pedido_completo).pack(fill="x", padx=15, pady=10)
+def normalizar_texto(texto):
+    if texto is None:
+        return ""
+    texto = str(texto).strip().lower()
+    texto = unicodedata.normalize('NFKD', texto)
+    texto = ''.join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = re.sub(r'[^a-z0-9]+', '', texto)
+    return texto
 
-    def atualizar_dropdown_bairros_pdv(self):
-        lista = [b[0] for b in listar_taxas()]
-        if lista:
-            self.combo_bairros_pdv.configure(values=lista); self.combo_bairros_pdv.set(lista[0])
-        else:
-            self.combo_bairros_pdv.configure(values=["Selecione o Bairro"]); self.combo_bairros_pdv.set("Selecione o Bairro")
 
-    def ao_selecionar_bairro_pdv(self, escolha):
-        conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-        c.execute("SELECT valor FROM taxas_entrega WHERE bairro=?", (escolha,))
-        res = c.fetchone(); conn.close()
-        self.carrinho.taxa_entrega = res[0] if res else 0.0
-        self.atualizar_carrinho_tela()
+def resolver_nome_foto(img_path, nome_produto=None):
+    if not img_path and not nome_produto:
+        return None
 
-    def buscar_cliente_automatico(self, event):
-        tel = self.txt_tel.get()
-        if tel:
-            conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-            c.execute("SELECT nome, endereco, bairro FROM clientes WHERE telefone=?", (tel,))
-            res = c.fetchone()
-            if res:
-                self.txt_nome.delete(0, 'end'); self.txt_nome.insert(0, res[0])
-                self.txt_end.delete(0, 'end'); self.txt_end.insert(0, res[1])
-                if res[2]: self.combo_bairros_pdv.set(res[2]); self.ao_selecionar_bairro_pdv(res[2])
-            conn.close()
+    base_static = os.path.join(os.path.dirname(__file__), 'static')
+    if not os.path.isdir(base_static):
+        return os.path.basename(str(img_path).strip()) if img_path else None
 
-    def atualizar_vitrine_tela(self):
-        for w in self.scroll_vitrine.winfo_children(): w.destroy()
-        for p in listar_produtos():
-            pid, nome, preco, desc = p
-            desc_val = desc if desc else "Sem descrição"
-            card = ctk.CTkFrame(self.scroll_vitrine, fg_color="#1A1A1A", height=75)
-            card.pack(fill="x", pady=4, padx=5); card.pack_propagate(False)
-            f_txt = ctk.CTkFrame(card, fg_color="transparent")
-            f_txt.pack(side="left", fill="both", expand=True, padx=10, pady=5)
-            ctk.CTkLabel(f_txt, text=nome, font=("Arial", 15, "bold")).pack(anchor="w")
-            ctk.CTkLabel(f_txt, text=desc_val, font=("Arial", 11), text_color="gray").pack(anchor="w")
-            ctk.CTkLabel(f_txt, text=f"R$ {preco:.2f}", text_color="#D32F2F", font=("Arial", 12, "bold")).pack(anchor="w")
-            ctk.CTkButton(card, text="➕", width=35, fg_color="#D32F2F", command=lambda id_p=pid, n=nome, pr=preco: self.add_carrinho(id_p, n, pr)).pack(side="right", padx=15, pady=15)
+    candidatos = []
 
-    def add_carrinho(self, pid, nome, preco):
-        self.carrinho.adicionar(pid, nome, preco); self.atualizar_carrinho_tela()
+    if img_path:
+        nome_original = str(img_path).strip().replace('\\', '/')
+        nome_base = os.path.basename(nome_original)
+        if nome_base:
+            candidatos.append(nome_base)
 
-    def atualizar_carrinho_tela(self):
-        for w in self.scroll_carrinho.winfo_children(): w.destroy()
-        for pid, info in self.carrinho.itens.items():
-            f = ctk.CTkFrame(self.scroll_carrinho, fg_color="transparent"); f.pack(fill="x", pady=2)
-            ctk.CTkLabel(f, text=f"{info['qtd']}x {info['nome']}").pack(side="left")
-            ctk.CTkButton(f, text="❌", width=20, fg_color="transparent", text_color="red", command=lambda id_p=pid: self.remover_item(id_p)).pack(side="right")
-            ctk.CTkLabel(f, text=f"R$ {(info['preco']*info['qtd']):.2f}", text_color="gray").pack(side="right", padx=10)
-        sub, tot = self.carrinho.obter_totais()
-        self.lbl_sub.configure(text=f"Subtotal: R$ {sub:.2f}")
-        self.lbl_tx.configure(text=f"Taxa: R$ {self.carrinho.taxa_entrega:.2f}")
-        self.lbl_tot.configure(text=f"TOTAL: R$ {tot:.2f}")
+    if nome_produto:
+        nome_produto_limpo = str(nome_produto).strip()
+        if nome_produto_limpo:
+            candidatos.append(nome_produto_limpo)
 
-    def remover_item(self, pid):
-        self.carrinho.remover(pid); self.atualizar_carrinho_tela()
+    for nome_em_teste in candidatos:
+        nome_normalizado = normalizar_texto(nome_em_teste)
+        if not nome_normalizado:
+            continue
 
-    def finalizar_pedido_completo(self):
-        sub, tot = self.carrinho.obter_totais()
-        if not self.carrinho.itens or not self.txt_nome.get(): 
-            messagebox.showwarning("Aviso", "Preencha o nome do cliente e os itens!"); return
-        nome_c, tel_c, end_c, bair_c, pag = self.txt_nome.get(), self.txt_tel.get(), self.txt_end.get(), self.combo_bairros_pdv.get(), self.combo_pag.get()
-        conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO clientes (telefone, nome, endereco, bairro) VALUES (?,?,?,?)", (tel_c, nome_c, end_c, bair_c))
-        conn.commit(); conn.close()
-        messagebox.showinfo("Sucesso", f"Pedido de {nome_c} salvo com sucesso!")
-        self.carrinho.itens.clear(); self.carrinho.taxa_entrega = 0.0; self.atualizar_carrinho_tela()
+        for nome_arquivo in os.listdir(base_static):
+            caminho_arquivo = os.path.join(base_static, nome_arquivo)
+            if not os.path.isfile(caminho_arquivo):
+                continue
 
-    def abrir_gerenciador(self):
-        g_win = ctk.CTkToplevel(self.root); g_win.title("Gerenciar Produtos"); g_win.geometry("650x450"); g_win.grab_set()
-        self.id_produto_em_edicao = None
-        
-        f_esq = ctk.CTkFrame(g_win, width=240); f_esq.pack(side="left", fill="both", padx=10, pady=10)
-        lbl_status = ctk.CTkLabel(f_esq, text="✨ Novo Produto", font=("Arial", 12, "bold"), text_color="gray"); lbl_status.pack(pady=5)
-        
-        txt_n = ctk.CTkEntry(f_esq, placeholder_text="Nome do Item"); txt_n.pack(fill="x", padx=10, pady=5)
-        txt_d = ctk.CTkEntry(f_esq, placeholder_text="Descrição (Ingredientes)"); txt_d.pack(fill="x", padx=10, pady=5)
-        txt_p = ctk.CTkEntry(f_esq, placeholder_text="Preço (Ex: 29.90)"); txt_p.pack(fill="x", padx=10, pady=5)
+            nome_arquivo_normalizado = normalizar_texto(nome_arquivo)
+            if not nome_arquivo_normalizado:
+                continue
 
-        scr_p = ctk.CTkScrollableFrame(g_win); scr_p.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+            if nome_normalizado == nome_arquivo_normalizado:
+                return nome_arquivo
 
-        def atualizar_lista_gerenciador():
-            for w in scr_p.winfo_children(): w.destroy()
-            conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-            c.execute("SELECT id, nome, preco, descricao FROM produtos")
-            for item in c.fetchall():
-                pid, nome, preco, desc = item
-                f_item = ctk.CTkFrame(scr_p, fg_color="#222"); f_item.pack(fill="x", pady=2, padx=5)
-                ctk.CTkLabel(f_item, text=f"{nome} - R$ {preco:.2f}", font=("Arial", 11, "bold")).pack(side="left", padx=5, pady=5)
-                ctk.CTkButton(f_item, text="❌", width=25, fg_color="transparent", text_color="red", command=lambda id_p=pid: remover_produto(id_p)).pack(side="right", padx=2)
-                ctk.CTkButton(f_item, text="✏️", width=25, fg_color="transparent", text_color="yellow", command=lambda p=item: carregar_para_edicao(p)).pack(side="right", padx=2)
-            conn.close()
+            if nome_normalizado in nome_arquivo_normalizado or nome_arquivo_normalizado in nome_normalizado:
+                return nome_arquivo
 
-        def carregar_para_edicao(item):
-            pid, nome, preco, desc = item
-            self.id_produto_em_edicao = pid
-            lbl_status.configure(text="✏️ Editando Produto", text_color="yellow")
-            btn_salvar.configure(text="Atualizar Produto", fg_color="#E65100")
-            txt_n.delete(0, 'end'); txt_n.insert(0, nome)
-            txt_d.delete(0, 'end'); txt_d.insert(0, desc if desc else "")
-            txt_p.delete(0, 'end'); txt_p.insert(0, str(preco))
+    if nome_produto:
+        nome_produto_limpo = str(nome_produto).strip().lower()
+        tokens = [t for t in re.split(r'[^a-z0-9]+', nome_produto_limpo) if t]
+        tokens = [t for t in tokens if t not in {'no', 'na', 'de', 'da', 'do', 'e', 's', 'com'}]
+        if tokens:
+            for nome_arquivo in os.listdir(base_static):
+                caminho_arquivo = os.path.join(base_static, nome_arquivo)
+                if not os.path.isfile(caminho_arquivo):
+                    continue
+                nome_arquivo_normalizado = normalizar_texto(nome_arquivo)
+                if not nome_arquivo_normalizado:
+                    continue
+                score = 0
+                for token in tokens:
+                    if token in nome_arquivo_normalizado:
+                        score += 1
+                if score > 0:
+                    return nome_arquivo
 
-        def remover_produto(pid):
-            if messagebox.askyesno("Confirmar", "Excluir item do cardápio?"):
-                conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-                c.execute("DELETE FROM produtos WHERE id=?", (pid,))
-                conn.commit(); conn.close()
-                if self.id_produto_em_edicao == pid: cancelando_edicao()
-                atualizar_lista_gerenciador(); self.atualizar_vitrine_tela()
+    if img_path:
+        return os.path.basename(str(img_path).strip().replace('\\', '/'))
+    return None
 
-        def cancelando_edicao():
-            self.id_produto_em_edicao = None
-            lbl_status.configure(text="✨ Novo Produto", text_color="gray")
-            btn_salvar.configure(text="Salvar Produto", fg_color="#D32F2F")
-            txt_n.delete(0, 'end'); txt_p.delete(0, 'end'); txt_d.delete(0, 'end')
+@app.route('/static/<path:filename>')
+def servir_imagem_static(filename):
+    return send_from_directory(os.path.join(os.path.dirname(__file__), 'static'), filename)
 
-        def salvar():
-            if not txt_n.get() or not txt_p.get(): return
-            conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-            nome, preco, desc = txt_n.get(), float(txt_p.get().replace(",", ".")), txt_d.get()
-            if self.id_produto_em_edicao:
-                c.execute("UPDATE produtos SET nome=?, preco=?, descricao=? WHERE id=?", (nome, preco, desc, self.id_produto_em_edicao))
-            else:
-                c.execute("INSERT INTO produtos (nome, preco, descricao) VALUES (?,?,?)", (nome, preco, desc))
-            conn.commit(); conn.close(); cancelando_edicao(); atualizar_lista_gerenciador(); self.atualizar_vitrine_tela()
+@app.route('/imagens/<path:filename>')
+def servir_imagem(filename):
+    caminho_static = os.path.join(os.path.dirname(__file__), 'static', filename)
+    if os.path.exists(caminho_static):
+        return send_from_directory(os.path.join(os.path.dirname(__file__), 'static'), filename)
+    return send_from_directory(os.path.join(os.path.dirname(__file__), 'imagens'), filename)
 
-        btn_salvar = ctk.CTkButton(f_esq, text="Salvar Produto", fg_color="#D32F2F", command=salvar); btn_salvar.pack(pady=10, padx=10, fill="x")
-        ctk.CTkButton(f_esq, text="Cancelar", fg_color="#333", command=cancelando_edicao).pack(pady=2, padx=10, fill="x")
-        atualizar_lista_gerenciador()
+@app.route('/api/categorias', methods=['GET'])
+def obtener_categorias():
+    try:
+        produtos_banco = listar_produtos()
+        categorias_set = set()
+        for p in produtos_banco:
+            cat = p[5]
+            cat_formatada = str(cat).strip().lower() if cat else "yakisoba"
+            categorias_set.add(cat_formatada.capitalize()) 
+        return jsonify({"sucesso": True, "categorias": sorted(list(categorias_set))})
+    except Exception as e:
+        return jsonify({"sucesso": False, "categorias": [], "erro": str(e)})
 
-    def abrir_gerenciador_clientes(self):
-        c_win = ctk.CTkToplevel(self.root); c_win.title("Clientes"); c_win.geometry("400x320"); c_win.grab_set()
-        txt_t = ctk.CTkEntry(c_win, placeholder_text="Telefone"); txt_t.pack(fill="x", padx=20, pady=5)
-        txt_n = ctk.CTkEntry(c_win, placeholder_text="Nome"); txt_n.pack(fill="x", padx=20, pady=5)
-        txt_e = ctk.CTkEntry(c_win, placeholder_text="Endereço"); txt_e.pack(fill="x", padx=20, pady=5)
-        combo_b = ctk.CTkOptionMenu(c_win, values=[b[0] for b in listar_taxas()] if listar_taxas() else ["Padrão"]); combo_b.pack(fill="x", padx=20, pady=5)
-        def salvar():
-            if not txt_t.get() or not txt_n.get(): return
-            conn = sqlite3.connect("sistema_delivery.db"); c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO clientes (telefone, nome, endereco, bairro) VALUES (?,?,?,?)", (txt_t.get(), txt_n.get(), txt_e.get(), combo_b.get()))
-            conn.commit(); conn.close(); c_win.destroy(); self.atualizar_dropdown_bairros_pdv()
-        ctk.CTkButton(c_win, text="Salvar Cliente", fg_color="#2E7D32", command=salvar).pack(pady=15)
+@app.route('/api/produtos/<categoria>', methods=['GET'])
+def obter_produtos_por_categoria(categoria):
+    try:
+        produtos_banco = listar_produtos() 
+        produtos_filtrados = []
+        for p in produtos_banco:
+            pid, nome, preco, desc, img_path, cat, est = p[0], p[1], p[2], p[3], p[4], p[5], p[6]
+            cat_formatada = str(cat).strip().lower() if cat else "yakisoba"
+            if cat_formatada == categoria.strip().lower():
+                nome_foto = resolver_nome_foto(img_path, nome)
+                produtos_filtrados.append({
+                    "id": pid,
+                    "nome": nome,
+                    "preco": preco,
+                    "descricao": desc if desc else "",
+                    "foto": nome_foto,
+                    "estoque": est
+                })
+        return jsonify({"sucesso": True, "produtos": produtos_filtrados})
+    except Exception as e:
+        return jsonify({"sucesso": False, "produtos": [], "erro": str(e)})
 
-    def abrir_gerenciador_taxas(self):
-        t_win = ctk.CTkToplevel(self.root); t_win.title("Taxas de Entrega"); t_win.geometry("500x350"); t_win.grab_set()
-        f_esq = ctk.CTkFrame
+# --- ROTA DE RECEBIMENTO DO PEDIDO ---
+
+@app.route('/api/pedido', methods=['POST'])
+def receber_pedido():
+    global pedidos_pendentes_caixa
+    
+    dados = request.get_json()
+
+    print("\n==========================================")
+    print("📩 NOVO PEDIDO RECEBIDO NO SERVIDOR!")
+    print(json.dumps(dados, indent=4, ensure_ascii=False) if dados else "Nenhum dado recebido!")
+    print("==========================================\n")
+
+    if not dados:
+        return jsonify({"sucesso": False, "mensagem": "Dados inválidos"}), 400
+
+    itens = dados.get("itens", "")
+    total = dados.get("total", 0)
+    forma_pagamento = dados.get("forma_pagamento") or dados.get("pagamento") or "PIX"
+    cliente = dados.get("cliente", "Cliente Web")
+    telefone = dados.get("telefone", "")
+    endereco = dados.get("endereco", "")
+    bairro = dados.get("bairro", "")
+    taxa_entrega = dados.get("taxa_entrega", 0)
+    itens_detalhados = dados.get("itens_detalhados", [])
+
+    if isinstance(itens_detalhados, str):
+        try:
+            itens_detalhados = json.loads(itens_detalhados)
+        except Exception:
+            itens_detalhados = []
+
+    if itens_detalhados:
+        itens_para_salvar = ", ".join([
+            f"{item.get('qtd', 1)}x {item.get('nome', 'Item')}"
+            for item in itens_detalhados
+            if isinstance(item, dict) and item.get('nome')
+        ])
+        if not itens_para_salvar:
+            itens_para_salvar = itens
+    else:
+        itens_para_salvar = itens
+
+    data_hora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Gravando no banco
+    try:
+        conn = sqlite3.connect('sistema_delivery.db')
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO vendas (data, cliente, total, pagamento, itens)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (data_hora, cliente, total, forma_pagamento, itens_para_salvar))
+
+        pedido_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        print(f"[SUCESSO] Pedido #{pedido_id} gravado no Histórico (vendas)!")
+    except Exception as e:
+        print(f"\n❌ [ERRO AO SALVAR NO HISTÓRICO]: {e}\n")
+        pedido_id = len(pedidos_pendentes_caixa) + 1
+
+    if str(forma_pagamento).upper() == "PIX":
+        status_inicial = "Aguardando PIX"
+    else:
+        status_inicial = "Novo (Web)"
+
+    novo_alerta = {
+        "id_pedido": pedido_id,
+        "itens": itens_para_salvar,
+        "itens_detalhados": itens_detalhados,
+        "total": total,
+        "taxa_entrega": float(taxa_entrega or 0),
+        "forma_pagamento": forma_pagamento,
+        "pagamento": forma_pagamento,
+        "cliente": cliente,
+        "telefone": telefone,
+        "endereco": endereco,
+        "bairro": bairro,
+        "status": status_inicial
+    }
+    
+    pedidos_pendentes_caixa.append(novo_alerta)
+    print(f"🔔 [ALERTA CRIADO]: Pedido #{pedido_id} adicionado à fila. Total pendente: {len(pedidos_pendentes_caixa)}")
+
+    return jsonify({"sucesso": True, "mensagem": "Pedido salvo e enviado ao Caixa!"})
+
+
+# --- ROTA QUE ENTREGARÁ OS ALERTAS AO CAIXA ---
+
+@app.route('/api/caixa/alertas', methods=['GET'])
+def obter_alertas_caixa():
+    global pedidos_pendentes_caixa
+    
+    # 🎯 CORREÇÃO: Entrega todos os pedidos pendentes
+    alertas_para_enviar = list(pedidos_pendentes_caixa)
+    
+    # Só limpa a fila se ela realmente contiver itens que foram entregues nesta consulta
+    if alertas_para_enviar:
+        pedidos_pendentes_caixa.clear()
+        print(f"📦 [ENTREGA DE ALERTAS]: {len(alertas_para_enviar)} alerta(s) enviado(s) ao Caixa!")
+
+    return jsonify({
+        "sucesso": True, 
+        "alertas": alertas_para_enviar
+    })
+
+
+@app.route('/api/taxas', methods=['GET'])
+def obter_taxas_entrega():
+    try:
+        return jsonify({"sucesso": True, "taxas": listar_taxas_entrega()})
+    except Exception as e:
+        return jsonify({"sucesso": False, "taxas": [], "erro": str(e)})
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+@app.route('/api/pedidos_pendentes', methods=['GET'])
+def buscar_pedidos_pendentes():
+    global pedidos_pendentes_caixa
+    
+    # Devolve todos os pedidos pendentes para o caixa
+    pedidos_para_enviar = list(pedidos_pendentes_caixa)
+    
+    # Limpa a fila para não enviar o mesmo pedido várias vezes
+    pedidos_pendentes_caixa.clear()
+    
+    return jsonify(pedidos_para_enviar)
