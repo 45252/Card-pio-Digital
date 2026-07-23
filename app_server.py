@@ -330,3 +330,15 @@ def obter_taxas_entrega():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+@app.route('/api/pedidos_pendentes', methods=['GET'])
+def buscar_pedidos_pendentes():
+    global pedidos_pendentes_caixa
+    
+    # Devolve todos os pedidos pendentes para o caixa
+    pedidos_para_enviar = list(pedidos_pendentes_caixa)
+    
+    # Limpa a fila para não enviar o mesmo pedido várias vezes
+    pedidos_pendentes_caixa.clear()
+    
+    return jsonify(pedidos_para_enviar)
