@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory, abort
 
 app = Flask(__name__)
 
@@ -39,6 +39,41 @@ def inicializar_banco():
     conn.close()
 
 inicializar_banco()
+
+# ==========================================================
+# 🖼️ ROTA INTELIGENTE DE IMAGENS (TOLERANTE A ERROS DE NOME/PASTA)
+# ==========================================================
+@app.route('/static/<path:filename>')
+def servir_static_inteligente(filename):
+    pasta_static = os.path.join(BASE_DIR, "static")
+    nome_arquivo = os.path.basename(filename)
+
+    # 1. Busca direta exata na pasta 'static'
+    caminho_direto = os.path.join(pasta_static, nome_arquivo)
+    if os.path.exists(caminho_direto):
+        return send_from_directory(pasta_static, nome_arquivo)
+
+    # 2. Varredura com tolerância a case-sensitive / extensões
+    nome_base_busca = os.path.splitext(nome_arquivo)[0].strip().lower()
+
+    if os.path.exists(pasta_static):
+        for arquivo_real in os.listdir(pasta_static):
+            nome_real_base = os.path.splitext(arquivo_real)[0].strip().lower()
+            
+            # Se o nome sem extensão for igual (ex: 'combo 1' casa com 'combo 1.jpg' ou 'combo 1.PNG')
+            if nome_real_base == nome_base_busca:
+                return send_from_directory(pasta_static, arquivo_real)
+
+    # 3. Busca de backup na pasta 'imagens' (caso alguma foto antiga tenha ficado lá)
+    pasta_imagens_backup = os.path.join(BASE_DIR, "imagens")
+    if os.path.exists(pasta_imagens_backup):
+        caminho_backup = os.path.join(pasta_imagens_backup, nome_arquivo)
+        if os.path.exists(caminho_backup):
+            return send_from_directory(pasta_imagens_backup, nome_arquivo)
+
+    # Se não encontrar de forma alguma
+    return abort(404)
+
 
 @app.route('/')
 def index():
