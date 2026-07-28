@@ -41,6 +41,40 @@ def inicializar_banco():
 inicializar_banco()
 
 # ==========================================================
+# 🕒 LÓGICA DE HORÁRIO DE FUNCIONAMENTO (BRASÍLIA UTC-3)
+# ==========================================================
+def verificar_loja_aberta():
+    # Ajusta o fuso horário para Brasília (UTC-3)
+    fuso_brasilia = datetime.timezone(datetime.timedelta(hours=-3))
+    agora = datetime.datetime.now(fuso_brasilia)
+    
+    dia_semana = agora.weekday() # 0: Seg, 1: Ter, 2: Qua, 3: Qui, 4: Sex, 5: Sáb, 6: Dom
+    hora_minuto = agora.hour * 60 + agora.minute # Converte a hora atual em minutos do dia
+
+    # Segunda-feira (0): Fechado
+    if dia_semana == 0:
+        return False, "Segunda-feira: Fechado"
+
+    # Terça (1), Quarta (2), Quinta (3): 18:00 às 22:00
+    elif dia_semana in [1, 2, 3]:
+        inicio = 18 * 60        # 18:00 (1080 min)
+        fim = 22 * 60           # 22:00 (1320 min)
+        aberto = inicio <= hora_minuto < fim
+        texto_horario = "Hoje (Ter-Qui): 18:00 às 22:00"
+        return aberto, texto_horario
+
+    # Sexta (4), Sábado (5), Domingo (6): 18:00 às 22:30
+    elif dia_semana in [4, 5, 6]:
+        inicio = 18 * 60        # 18:00 (1080 min)
+        fim = 22 * 60 + 30      # 22:30 (1350 min)
+        aberto = inicio <= hora_minuto < fim
+        texto_horario = "Hoje (Sex-Dom): 18:00 às 22:30"
+        return aberto, texto_horario
+
+    return False, "Fechado"
+
+
+# ==========================================================
 # 🖼️ ROTA INTELIGENTE DE IMAGENS (TOLERANTE A ERROS DE NOME/PASTA)
 # ==========================================================
 @app.route('/static/<path:filename>')
@@ -60,24 +94,25 @@ def servir_static_inteligente(filename):
         for arquivo_real in os.listdir(pasta_static):
             nome_real_base = os.path.splitext(arquivo_real)[0].strip().lower()
             
-            # Se o nome sem extensão for igual (ex: 'combo 1' casa com 'combo 1.jpg' ou 'combo 1.PNG')
+            # Se o nome sem extensão for igual
             if nome_real_base == nome_base_busca:
                 return send_from_directory(pasta_static, arquivo_real)
 
-    # 3. Busca de backup na pasta 'imagens' (caso alguma foto antiga tenha ficado lá)
+    # 3. Busca de backup na pasta 'imagens'
     pasta_imagens_backup = os.path.join(BASE_DIR, "imagens")
     if os.path.exists(pasta_imagens_backup):
         caminho_backup = os.path.join(pasta_imagens_backup, nome_arquivo)
         if os.path.exists(caminho_backup):
             return send_from_directory(pasta_imagens_backup, nome_arquivo)
 
-    # Se não encontrar de forma alguma
     return abort(404)
 
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    loja_aberta, texto_horario = verificar_loja_aberta()
+    return render_template('index.html', loja_aberta=loja_aberta, texto_horario=texto_horario)
+
 
 @app.route('/api/produtos', methods=['GET'])
 def get_produtos():
@@ -95,9 +130,19 @@ def get_produtos():
         })
     return jsonify(lista)
 
+
 @app.route('/api/pedido', methods=['POST'])
 def receber_pedido():
     global pedidos_pendentes_caixa
+    
+    # 🛑 Trava de Segurança: Bloqueia se a loja estiver fechada
+    loja_aberta, texto_horario = verificar_loja_aberta()
+    if not loja_aberta:
+        return jsonify({
+            "sucesso": False, 
+            "mensagem": f"Estamos fechados no momento! ({texto_horario})"
+        }), 400
+
     dados = request.get_json() or {}
     
     cliente = dados.get("cliente", "Cliente Web")
@@ -105,7 +150,8 @@ def receber_pedido():
     forma_pagamento = dados.get("forma_pagamento") or dados.get("pagamento") or "PIX"
     itens = dados.get("itens", "")
     
-    data_hora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    fuso_brasilia = datetime.timezone(datetime.timedelta(hours=-3))
+    data_hora = datetime.datetime.now(fuso_brasilia).strftime("%d/%m/%Y %H:%M")
     
     # Adiciona na fila do caixa
     pedido_id = len(pedidos_pendentes_caixa) + 1
@@ -121,12 +167,14 @@ def receber_pedido():
     
     return jsonify({"sucesso": True, "mensagem": "Pedido enviado com sucesso!"})
 
+
 @app.route('/api/pedidos_pendentes', methods=['GET'])
 def buscar_pedidos_pendentes():
     global pedidos_pendentes_caixa
     pedidos_para_enviar = list(pedidos_pendentes_caixa)
     pedidos_pendentes_caixa.clear()
     return jsonify(pedidos_para_enviar)
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
