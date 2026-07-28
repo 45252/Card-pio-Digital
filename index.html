@@ -42,9 +42,6 @@
             padding: 15px;
             text-align: center;
             border-bottom: 2px solid #2D2D2D;
-            position: sticky;
-            top: 0;
-            z-index: 10;
         }
         header h1 { color: #E53935; font-size: 20px; margin-bottom: 2px; }
         header p { color: #888; font-size: 12px; }
@@ -59,11 +56,11 @@
             white-space: nowrap;
             border-bottom: 1px solid #2D2D2D;
             position: sticky;
-            top: 74px;
+            top: 40px;
             z-index: 9;
-            scrollbar-width: none; /* Esconde scroll no Firefox */
+            scrollbar-width: none;
         }
-        .categorias-container::-webkit-scrollbar { display: none; } /* Esconde scroll no Chrome/Safari */
+        .categorias-container::-webkit-scrollbar { display: none; }
         
         .categoria-btn {
             background-color: #262626; color: white; border: none; padding: 8px 16px;
@@ -76,7 +73,7 @@
         .main-content {
             padding: 15px;
             flex-grow: 1;
-            margin-bottom: 80px; /* Espaço para a barra do carrinho móvel */
+            margin-bottom: 80px;
         }
         #titulo-categoria { font-size: 18px; margin-bottom: 15px; border-left: 4px solid #E53935; padding-left: 8px; }
         
@@ -277,7 +274,7 @@
                 </div>
             </div>
 
-            <div class="pix-chave-container">
+            <div class="pix-chave-container" id="pix-section">
                 <span class="pix-chave-texto" id="pix-chave-texto">renshuoriental@outlook.com</span>
                 <button type="button" class="btn-copiar-pix" onclick="copiarChavePix(event)">Copiar</button>
             </div>
@@ -285,7 +282,7 @@
             {% if loja_aberta %}
                 <button class="checkout-btn" id="btn-finalizar" onclick="enviarPedidoWeb()">Finalizar e Enviar Pedido</button>
             {% else %}
-                <button class="checkout-btn" id="btn-finalizar" disabled>Loja Fechada no Momento</button>
+                <button class="checkout-btn" id="btn-finalizar" disabled style="background-color: #555; cursor: not-allowed;">Loja Fechada no Momento</button>
             {% endif %}
         </div>
     </div>
@@ -298,6 +295,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             carregarTaxas();
+            carregarCategorias();
             document.getElementById('forma-pagamento').addEventListener('change', atualizarExibicaoPix);
         });
 
@@ -314,11 +312,9 @@
                             const option = document.createElement('option');
                             option.value = taxa.bairro;
                             option.setAttribute('data-taxa', taxa.valor.toFixed(2));
-                            option.textContent = taxa.bairro;
+                            option.textContent = `${taxa.bairro} (R$ ${taxa.valor.toFixed(2).replace('.', ',')})`;
                             selectBairro.appendChild(option);
                         });
-                } else {
-                    selectBairro.innerHTML = '<option value="" data-taxa="0">Selecione o seu Bairro...</option>';
                 }
             } catch (erro) {
                 console.error('Erro ao carregar taxas:', erro);
@@ -329,6 +325,7 @@
             try {
                 const response = await fetch(`${IP_SERVIDOR}/api/categorias`);
                 const dados = await response.json();
+                
                 if (dados.sucesso && dados.categorias.length > 0) {
                     const container = document.getElementById('lista-categorias');
                     container.innerHTML = '';
@@ -349,17 +346,21 @@
                             carregarProdutos(cat);
                         }
                     });
+                } else {
+                    document.getElementById('titulo-categoria').innerText = "Nenhuma categoria cadastrada";
                 }
-            } catch (erro) { console.error("Erro ao carregar categorias:", erro); }
+            } catch (erro) { 
+                console.error("Erro ao carregar categorias:", erro); 
+            }
         }
 
         async function carregarProdutos(categoria) {
             document.getElementById('titulo-categoria').innerText = categoria;
             const grid = document.getElementById('grid-produtos');
-            grid.innerHTML = '<p style="color:#aaa;">Carregando delícias...</p>';
+            grid.innerHTML = '<p style="color:#aaa;">Carregando cardápio...</p>';
 
             try {
-                const response = await fetch(`${IP_SERVIDOR}/api/produtos/${categoria}`);
+                const response = await fetch(`${IP_SERVIDOR}/api/produtos/${encodeURIComponent(categoria)}`);
                 const dados = await response.json();
                 if (dados.sucesso) {
                     grid.innerHTML = '';
@@ -381,7 +382,7 @@
                         const botaoDisabled = LOJA_ABERTA ? "" : "disabled";
 
                         card.innerHTML = `
-                            <img src="${urlFoto}" class="produto-img" alt="${prod.nome}">
+                            <img src="${urlFoto}" class="produto-img" alt="${prod.nome}" onerror="this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=200'">
                             <div class="produto-info">
                                 <h3>${prod.nome}</h3>
                                 <p>${prod.descricao}</p>
@@ -399,7 +400,7 @@
 
         function adicionarAoCarrinho(id) {
             if (!LOJA_ABERTA) {
-                alert("Desculpe, estamos fechados no momento!");
+                alert("🔒 Estamos fechados no momento! Não é possível adicionar itens.");
                 return;
             }
             const produto = produtosCarregados.find(p => p.id === id);
@@ -455,7 +456,7 @@
             const selectBairro = document.getElementById('cli-bairro');
             const opcaoSelecionada = selectBairro.options[selectBairro.selectedIndex];
             const bairroSelecionado = selectBairro.value;
-            let taxaEntrega = parseFloat(opcaoSelecionada.getAttribute('data-taxa')) || 0;
+            let taxaEntrega = parseFloat(opcaoSelecionada ? opcaoSelecionada.getAttribute('data-taxa') : 0) || 0;
 
             let totalGeral = subtotal + taxaEntrega;
 
@@ -478,11 +479,7 @@
             const formaPagamento = document.getElementById('forma-pagamento').value;
             const pixSection = document.getElementById('pix-section');
             if (pixSection) {
-                if (formaPagamento === 'PIX') {
-                    pixSection.classList.add('ativo');
-                } else {
-                    pixSection.classList.remove('ativo');
-                }
+                pixSection.style.display = (formaPagamento === 'PIX') ? 'flex' : 'none';
             }
         }
 
@@ -491,48 +488,19 @@
             const botao = event ? event.target.closest('button') : document.querySelector('.btn-copiar-pix'); 
             const textoOriginal = botao.innerText;
 
-            function aplicarEfeitoSucesso() {
-                botao.innerText = '✅ Copiado!';
-                botao.classList.add('copiado');
-                setTimeout(() => {
-                    botao.innerText = textoOriginal;
-                    botao.classList.remove('copiado');
-                }, 2000);
-            }
-
             if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(chavePix)
-                    .then(() => aplicarEfeitoSucesso())
-                    .catch(() => executarFallback(chavePix, aplicarEfeitoSucesso));
+                navigator.clipboard.writeText(chavePix).then(() => {
+                    botao.innerText = '✅ Copiado!';
+                    setTimeout(() => { botao.innerText = textoOriginal; }, 2000);
+                });
             } else {
-                executarFallback(chavePix, aplicarEfeitoSucesso);
-            }
-        }
-
-        function executarFallback(texto, sucessoCallback) {
-            try {
-                const elementoTemporario = document.createElement('textarea');
-                elementoTemporario.value = texto;
-                elementoTemporario.style.position = 'fixed'; 
-                document.body.appendChild(elementoTemporario);
-                elementoTemporario.select();
-                elementoTemporario.setSelectionRange(0, 99999);
-                const copiou = document.execCommand('copy');
-                document.body.removeChild(elementoTemporario);
-
-                if (copiou) {
-                    sucessoCallback();
-                } else {
-                    throw new Error('Falha ao copiar');
-                }
-            } catch (err) {
-                alert('Não foi possível copiar automaticamente. Chave: ' + texto);
+                alert('Chave PIX: ' + chavePix);
             }
         }
 
         function enviarPedidoWeb() {
             if (!LOJA_ABERTA) {
-                alert("Desculpe, o restaurante está fechado no momento.");
+                alert("🔒 O restaurante encontra-se fechado no momento e não está aceitando novos pedidos.");
                 return;
             }
 
@@ -619,8 +587,6 @@
                 alert("Erro ao conectar com o servidor.");
             });
         }
-
-        window.onload = carregarCategorias;
     </script>
 </body>
 </html>

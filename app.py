@@ -100,7 +100,7 @@ def verificar_loja_aberta():
         inicio = 18 * 60         # 18:00 (1080 min)
         fim = 22 * 60            # 22:00 (1320 min)
         aberto = inicio <= hora_minuto < fim
-        texto_horario = "Hoje (Ter-Qui): 18:00 às 22:00"
+        texto_horario = "Horário de Hoje (Ter-Qui): 18:00 às 22:00"
         return aberto, texto_horario
 
     # Sexta (4), Sábado (5), Domingo (6): 18:00 às 22:30
@@ -108,7 +108,7 @@ def verificar_loja_aberta():
         inicio = 18 * 60         # 18:00 (1080 min)
         fim = 22 * 60 + 30       # 22:30 (1350 min)
         aberto = inicio <= hora_minuto < fim
-        texto_horario = "Hoje (Sex-Dom): 18:00 às 22:30"
+        texto_horario = "Horário de Hoje (Sex-Dom): 18:00 às 22:30"
         return aberto, texto_horario
 
     return False, "Fechado"
@@ -205,12 +205,21 @@ def index():
     return render_template('index.html', loja_aberta=loja_aberta, texto_horario=texto_horario)
 
 
+@app.route('/api/status_loja', methods=['GET'])
+def obter_status_loja():
+    loja_aberta, texto_horario = verificar_loja_aberta()
+    return jsonify({
+        "loja_aberta": loja_aberta,
+        "texto_horario": texto_horario
+    })
+
+
 @app.route('/api/categorias', methods=['GET'])
 def obter_categorias():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT categoria FROM produtos")
+        cursor.execute("SELECT DISTINCT categoria FROM produtos WHERE categoria IS NOT NULL AND categoria != ''")
         categorias = cursor.fetchall()
         conn.close()
 
@@ -284,12 +293,12 @@ def obter_taxas_entrega():
 # ==========================================================
 @app.route('/api/pedido', methods=['POST'])
 def receber_pedido():
-    # Trava do Horário de Funcionamento
+    # Trava do Horário de Funcionamento no Backend
     loja_aberta, texto_horario = verificar_loja_aberta()
     if not loja_aberta:
         return jsonify({
             "sucesso": False, 
-            "mensagem": f"Estamos fechados no momento! ({texto_horario})"
+            "mensagem": f"🔒 Desculpe! Estamos fechados no momento. ({texto_horario})"
         }), 400
 
     dados = request.get_json() or {}
@@ -364,7 +373,6 @@ def receber_pedido():
 # ==========================================================
 @app.route('/api/pedidos_pendentes', methods=['GET'])
 def buscar_pedidos_pendentes():
-    """Retorna todos os pedidos que precisam da atenção do Caixa (Novos ou Aguardando PIX)"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -403,7 +411,6 @@ def buscar_pedidos_pendentes():
 
 @app.route('/api/pedidos/aguardando_pix', methods=['GET'])
 def listar_pedidos_aguardando_pix():
-    """Filtro específico para pedidos que aguardam confirmação do comprovante PIX via WhatsApp"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -431,9 +438,8 @@ def listar_pedidos_aguardando_pix():
 
 @app.route('/api/pedido/<int:pedido_id>/status', methods=['PUT'])
 def atualizar_status_pedido(pedido_id):
-    """Rota para o caixa APROVAR o PIX, CANCELAR ou enviar para PREPARO"""
     dados = request.get_json() or {}
-    novo_status = dados.get("status")  # Ex: 'Aprovado', 'Em Preparo', 'Cancelado'
+    novo_status = dados.get("status")
 
     if not novo_status:
         return jsonify({"sucesso": False, "mensagem": "Status não fornecido"}), 400
