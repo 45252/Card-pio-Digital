@@ -17,6 +17,41 @@ pedidos_pendentes_caixa = []
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'sistema_delivery.db')
 
+
+# --- VERIFICAÇÃO DE HORÁRIO DE ATENDIMENTO ---
+def verificar_status_loja():
+    """
+    Retorna uma tupla (loja_aberta: bool, horario_texto: str)
+    Regras:
+    - Segunda: Fechado
+    - Terça, Quarta e Quinta: 18:00 às 22:00
+    - Sexta, Sábado e Domingo: 18:00 às 22:30
+    """
+    agora = datetime.datetime.now()
+    dia_semana = agora.weekday()  # 0=Seg, 1=Ter, 2=Qua, 3=Qui, 4=Sex, 5=Sáb, 6=Dom
+    hora_atual = agora.time()
+
+    # Segunda-feira
+    if dia_semana == 0:
+        return False, "Fechado às Segundas-feiras"
+
+    # Terça (1), Quarta (2) e Quinta (3)
+    elif dia_semana in [1, 2, 3]:
+        inicio = datetime.time(18, 0)
+        fim = datetime.time(22, 0)
+        texto = "Terça a Quinta das 18:00 às 22:00"
+        aberta = inicio <= hora_atual <= fim
+        return aberta, texto
+
+    # Sexta (4), Sábado (5) e Domingo (6)
+    else:
+        inicio = datetime.time(18, 0)
+        fim = datetime.time(22, 30)
+        texto = "Sexta a Domingo das 18:00 às 22:30"
+        aberta = inicio <= hora_atual <= fim
+        return aberta, texto
+
+
 def inicializar_banco():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -55,7 +90,6 @@ def inicializar_banco():
         )
     ''')
     
-    # Salva todas as tabelas e fecha a conexão no FINAL
     conn.commit()
     conn.close()
 
@@ -82,7 +116,8 @@ def listar_taxas_entrega():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    loja_aberta, horario_texto = verificar_status_loja()
+    return render_template('index.html', loja_aberta=loja_aberta, horario_texto=horario_texto)
 
 def normalizar_texto(texto):
     if texto is None:
@@ -207,6 +242,14 @@ def obter_produtos_por_categoria(categoria):
 
 @app.route('/api/pedido', methods=['POST'])
 def receber_pedido():
+    # Valida se a loja está aberta antes de aceitar o pedido
+    loja_aberta, horario_texto = verificar_status_loja()
+    if not loja_aberta:
+        return jsonify({
+            "sucesso": False, 
+            "mensagem": f"Estamos fechados no momento! Horário de atendimento: {horario_texto}."
+        }), 400
+
     global pedidos_pendentes_caixa
     
     dados = request.get_json()
