@@ -56,6 +56,20 @@ def inicializar_banco():
         )
     ''')
 
+
+    # 4. Tabela de Horários de Funcionamento
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS horarios_funcionamento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia_semana INTEGER NOT NULL UNIQUE,
+            nome_dia TEXT NOT NULL,
+            abertura TEXT,
+            fechamento TEXT,
+            fechado INTEGER DEFAULT 0
+        )
+    ''')
+
+
     # Adiciona colunas faltantes de forma retrocompatível caso o banco já existisse
     colunas_novas = [
         ("status", "TEXT DEFAULT 'Novo (Web)'"),
@@ -71,12 +85,50 @@ def inicializar_banco():
     for nome_coluna, tipo_coluna in colunas_novas:
         if nome_coluna not in colunas_existentes:
             try:
-                cursor.execute(f"ALTER TABLE vendas ADD COLUMN {nome_coluna} {tipo_coluna}")
+                cursor.execute(
+                    f"ALTER TABLE vendas ADD COLUMN {nome_coluna} {tipo_coluna}"
+                )
             except Exception as e:
                 print(f"Aviso ao ajustar coluna {nome_coluna}: {e}")
 
+
+    # Cria horários padrão apenas se ainda não existirem
+    cursor.execute(
+        "SELECT COUNT(*) FROM horarios_funcionamento"
+    )
+
+    total_horarios = cursor.fetchone()[0]
+
+
+    if total_horarios == 0:
+
+        horarios_padrao = [
+            (0, "Segunda", "", "", 1),
+            (1, "Terça", "18:00", "22:00", 0),
+            (2, "Quarta", "18:00", "22:00", 0),
+            (3, "Quinta", "18:00", "22:00", 0),
+            (4, "Sexta", "18:00", "22:30", 0),
+            (5, "Sábado", "18:00", "22:30", 0),
+            (6, "Domingo", "18:00", "22:30", 0)
+        ]
+
+
+        cursor.executemany('''
+            INSERT INTO horarios_funcionamento
+            (
+                dia_semana,
+                nome_dia,
+                abertura,
+                fechamento,
+                fechado
+            )
+            VALUES (?, ?, ?, ?, ?)
+        ''', horarios_padrao)
+
+
     conn.commit()
     conn.close()
+
 
 inicializar_banco()
 
@@ -85,33 +137,87 @@ inicializar_banco()
 # 🕒 LÓGICA DE HORÁRIO DE FUNCIONAMENTO (BRASÍLIA UTC-3)
 # ==========================================================
 def verificar_loja_aberta():
+
     fuso_brasilia = datetime.timezone(datetime.timedelta(hours=-3))
     agora = datetime.datetime.now(fuso_brasilia)
-    
-    dia_semana = agora.weekday()  # 0: Seg, 1: Ter, 2: Qua, 3: Qui, 4: Sex, 5: Sáb, 6: Dom
+
+    dia_semana = agora.weekday()
     hora_minuto = agora.hour * 60 + agora.minute
 
-    # Segunda-feira (0): Fechado
-    if dia_semana == 0:
-        return False, "Segunda-feira: Fechado"
 
-    # Terça (1), Quarta (2), Quinta (3): 18:00 às 22:00
-    elif dia_semana in [1, 2, 3]:
-        inicio = 18 * 60         # 18:00 (1080 min)
-        fim = 22 * 60            # 22:00 (1320 min)
+    try:
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+
+        cursor.execute("""
+            SELECT 
+                nome_dia,
+                abertura,
+                fechamento,
+                fechado
+            FROM horarios_funcionamento
+            WHERE dia_semana = ?
+        """, (dia_semana,))
+
+
+        horario = cursor.fetchone()
+
+        conn.close()
+
+
+        # Caso não exista configuração para o dia
+        if not horario:
+            return False, "Horário não configurado"
+
+
+        nome_dia, abertura, fechamento, fechado = horario
+
+
+        # Dia marcado como fechado
+        if fechado == 1:
+            return False, f"{nome_dia}: Fechado"
+
+
+        # Segurança caso horário esteja vazio
+        if not abertura or not fechamento:
+            return False, f"{nome_dia}: Horário não configurado"
+
+
+        inicio = (
+            int(abertura[:2]) * 60
+            +
+            int(abertura[3:])
+        )
+
+
+        fim = (
+            int(fechamento[:2]) * 60
+            +
+            int(fechamento[3:])
+        )
+
+
         aberto = inicio <= hora_minuto < fim
-        texto_horario = "Horário de Hoje (Ter-Qui): 18:00 às 22:00"
+
+
+        texto_horario = (
+            f"Funcionamento hoje ({nome_dia}): "
+            f"{abertura} às {fechamento}"
+        )
+
+
         return aberto, texto_horario
 
-    # Sexta (4), Sábado (5), Domingo (6): 18:00 às 22:30
-    elif dia_semana in [4, 5, 6]:
-        inicio = 18 * 60         # 18:00 (1080 min)
-        fim = 22 * 60 + 30       # 22:30 (1350 min)
-        aberto = inicio <= hora_minuto < fim
-        texto_horario = "Horário de Hoje (Sex-Dom): 18:00 às 22:30"
-        return aberto, texto_horario
 
-    return False, "Fechado"
+    except Exception as erro:
+
+        print(
+            f"Erro ao verificar horário: {erro}"
+        )
+
+        return False, "Erro ao consultar horário"
 
 
 # ==========================================================
