@@ -187,11 +187,11 @@
 
     {% if loja_aberta %}
         <div class="status-loja-banner aberto">
-            🟢 ESTAMOS ABERTOS | {{ horario_texto }}
+            🟢 ESTAMOS ABERTOS |  {{ texto_horario }} 
         </div>
     {% else %}
         <div class="status-loja-banner fechado">
-            🔴 NO MOMENTO ESTAMOS FECHADOS | {{ horario_texto }}
+            🔴 NO MOMENTO ESTAMOS FECHADOS |  {{ texto_horario }} 
         </div>
     {% endif %}
 
@@ -289,15 +289,44 @@
 
     <script>
         const IP_SERVIDOR = window.location.origin;
-        const LOJA_ABERTA = "{{ 'true' if loja_aberta else 'false' }}" === "true";
-        let carrinho = [];
-        let produtosCarregados = [];
+        
+let carrinho = [];
+let produtosCarregados = [];
+let LOJA_ABERTA = false;
 
-        document.addEventListener('DOMContentLoaded', () => {
-            carregarTaxas();
-            carregarCategorias();
-            document.getElementById('forma-pagamento').addEventListener('change', atualizarExibicaoPix);
-        });
+
+// Atualiza o status da loja pelo servidor
+async function atualizarStatusLoja(){
+
+    try{
+
+        const resposta = await fetch('/api/status_loja');
+        const dados = await resposta.json();
+
+        LOJA_ABERTA = dados.loja_aberta;
+
+        console.log("Status da loja:", LOJA_ABERTA);
+
+    }catch(e){
+
+        console.log("Erro status loja", e);
+
+    }
+
+}
+
+
+document.addEventListener('DOMContentLoaded', async () => {
+
+    await atualizarStatusLoja();
+
+    carregarTaxas();
+    carregarCategorias();
+
+    document.getElementById('forma-pagamento')
+    .addEventListener('change', atualizarExibicaoPix);
+
+});
 
         async function carregarTaxas() {
             try {
