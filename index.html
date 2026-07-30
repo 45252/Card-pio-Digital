@@ -46,7 +46,7 @@
         header h1 { color: #E53935; font-size: 20px; margin-bottom: 2px; }
         header p { color: #888; font-size: 12px; }
 
-        /* Categorias horizontais (estilo carrossel no celular) */
+        /* Categorias horizontais */
         .categorias-container {
             background-color: #1A1A1A;
             padding: 10px;
@@ -102,7 +102,7 @@
             background-color: #444; color: #888; cursor: not-allowed;
         }
 
-        /* Barra do Carrinho Inferior (Mobile Friendly) */
+        /* Barra do Carrinho Inferior */
         .cart-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
             background-color: #1A1A1A; border-top: 2px solid #2D2D2D;
@@ -185,15 +185,13 @@
 </head>
 <body>
 
-    {% if loja_aberta %}
-        <div class="status-loja-banner aberto">
-            🟢 ESTAMOS ABERTOS |  {{ texto_horario }} 
-        </div>
-    {% else %}
-        <div class="status-loja-banner fechado">
-            🔴 NO MOMENTO ESTAMOS FECHADOS |  {{ texto_horario }} 
-        </div>
-    {% endif %}
+    <div id="status-banner" class="status-loja-banner {{ 'aberto' if loja_aberta else 'fechado' }}">
+        {% if loja_aberta %}
+            🟢 ESTAMOS ABERTOS | {{ texto_horario }}
+        {% else %}
+            🔴 NO MOMENTO ESTAMOS FECHADOS | {{ texto_horario }}
+        {% endif %}
+    </div>
 
     <header>
         <h1>🍣 Renshu Sushi</h1>
@@ -279,54 +277,65 @@
                 <button type="button" class="btn-copiar-pix" onclick="copiarChavePix(event)">Copiar</button>
             </div>
 
-            {% if loja_aberta %}
-                <button class="checkout-btn" id="btn-finalizar" onclick="enviarPedidoWeb()">Finalizar e Enviar Pedido</button>
-            {% else %}
-                <button class="checkout-btn" id="btn-finalizar" disabled style="background-color: #555; cursor: not-allowed;">Loja Fechada no Momento</button>
-            {% endif %}
+            <button class="checkout-btn" id="btn-finalizar" onclick="enviarPedidoWeb()">Finalizar e Enviar Pedido</button>
         </div>
     </div>
 
     <script>
         const IP_SERVIDOR = window.location.origin;
         
-let carrinho = [];
-let produtosCarregados = [];
-let LOJA_ABERTA = false;
+        let carrinho = [];
+        let produtosCarregados = [];
+        let LOJA_ABERTA = false;
 
+        // Atualiza o status da loja e ajusta os elementos visuais
+        async function atualizarStatusLoja() {
+            try {
+                const resposta = await fetch('/api/status_loja');
+                const dados = await resposta.json();
 
-// Atualiza o status da loja pelo servidor
-async function atualizarStatusLoja(){
+                LOJA_ABERTA = dados.loja_aberta;
 
-    try{
+                // 1. Atualiza o Banner Superior
+                const banner = document.getElementById('status-banner');
+                if (banner) {
+                    if (LOJA_ABERTA) {
+                        banner.className = 'status-loja-banner aberto';
+                        banner.innerText = `🟢 ESTAMOS ABERTOS | ${dados.texto_horario}`;
+                    } else {
+                        banner.className = 'status-loja-banner fechado';
+                        banner.innerText = `🔴 NO MOMENTO ESTAMOS FECHADOS | ${dados.texto_horario}`;
+                    }
+                }
 
-        const resposta = await fetch('/api/status_loja');
-        const dados = await resposta.json();
+                // 2. Atualiza o Botão de Finalizar
+                const btnFinalizar = document.getElementById('btn-finalizar');
+                if (btnFinalizar) {
+                    if (LOJA_ABERTA) {
+                        btnFinalizar.disabled = false;
+                        btnFinalizar.innerText = "Finalizar e Enviar Pedido";
+                        btnFinalizar.style.backgroundColor = "#4CAF50";
+                        btnFinalizar.style.cursor = "pointer";
+                    } else {
+                        btnFinalizar.disabled = true;
+                        btnFinalizar.innerText = "Loja Fechada no Momento";
+                        btnFinalizar.style.backgroundColor = "#555";
+                        btnFinalizar.style.cursor = "not-allowed";
+                    }
+                }
 
-        LOJA_ABERTA = dados.loja_aberta;
+            } catch (e) {
+                console.error("Erro ao verificar status da loja:", e);
+            }
+        }
 
-        console.log("Status da loja:", LOJA_ABERTA);
+        document.addEventListener('DOMContentLoaded', async () => {
+            await atualizarStatusLoja();
+            await carregarTaxas();
+            await carregarCategorias();
 
-    }catch(e){
-
-        console.log("Erro status loja", e);
-
-    }
-
-}
-
-
-document.addEventListener('DOMContentLoaded', async () => {
-
-    await atualizarStatusLoja();
-
-    carregarTaxas();
-    carregarCategorias();
-
-    document.getElementById('forma-pagamento')
-    .addEventListener('change', atualizarExibicaoPix);
-
-});
+            document.getElementById('forma-pagamento').addEventListener('change', atualizarExibicaoPix);
+        });
 
         async function carregarTaxas() {
             try {
